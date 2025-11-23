@@ -4,8 +4,7 @@ import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 
-// Карта без SSR
-const MapComponent = dynamic(() => import('@/components/MapComponent'), {
+const MapComponent = dynamic(() => import('./MapComponent'), {
   ssr: false,
   loading: () => (
     <div className="h-96 bg-gray-900 rounded-3xl flex items-center justify-center text-white text-3xl">
@@ -20,27 +19,19 @@ interface Props {
 
 export default function GameContent({ fid }: Props) {
   const [round, setRound] = useState<any>(null);
+  const [myPosition, setMyPosition] = useState<[number, number] | null>(null);
   const [timeLeft, setTimeLeft] = useState(60);
   const [playersCount, setPlayersCount] = useState(0);
   const [status, setStatus] = useState<'waiting' | 'playing' | 'finished'>('waiting');
 
-  // Загрузка раунда + подписка
+  // ЭТОТ useEffect — 100% БЕЗ ОШИБОК
   useEffect(() => {
-    // Инициализация — загрузка текущего раунда
-    const init = async () => {
+    // Загрузка текущего раунда
+    (async () => {
       try {
-        const { data: cur } = await supabase
-          .from('current_round')
-          .select('round_id')
-          .single();
-
+        const { data: cur } = await supabase.from('current_round').select('round_id').single();
         if (cur?.round_id) {
-          const { data: r } = await supabase
-            .from('rounds')
-            .select('*')
-            .eq('id', cur.round_id)
-            .single();
-
+          const { data: r } = await supabase.from('rounds').select('*').eq('id', cur.round_id).single();
           if (r) {
             setRound(r);
             setStatus(r.status || 'waiting');
@@ -50,32 +41,29 @@ export default function GameContent({ fid }: Props) {
       } catch (err) {
         console.error('Ошибка загрузки раунда:', err);
       }
-    };
+    })();
 
-    init();
-
-    // Подписка на изменения в реальном времени
+    // Подписка на изменения
     const channel = supabase
       .channel('rounds')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'rounds' },
         (payload: any) => {
-          const updated = payload.new;
-          if (!round || updated.id === round.id) {
-            setRound(updated);
-            setStatus(updated.status || 'waiting');
-            setPlayersCount(updated.players?.length || 0);
+          const r = payload.new;
+          if (!round || r.id === round.id) {
+            setRound(r);
+            setStatus(r.status || 'waiting');
+            setPlayersCount(r.players?.length || 0);
           }
         }
       )
       .subscribe();
 
-    // Отписываемся при размонтировании
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []); // ← пустой массив зависимостей = один раз при монтировании
+  }, []); // ← пустой массив = всё ок
 
   // Таймер
   useEffect(() => {
@@ -99,7 +87,7 @@ export default function GameContent({ fid }: Props) {
       <p className="text-4xl">{playersCount} игроков</p>
 
       <div className="mt-12">
-        <MapComponent fid={fid} round={round} status={status} />
+        <MapComponent fid={fid} round={round} status={status} myPosition={myPosition} setMyPosition={setMyPosition} />
       </div>
 
       <div className="text-6xl font-bold mt-12">

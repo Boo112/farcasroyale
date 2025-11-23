@@ -5,7 +5,6 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { supabase } from '@/lib/supabase';
 
-// Фиксим иконки
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -17,9 +16,11 @@ interface Props {
   fid: number;
   round: any;
   status: string;
+  myPosition: [number, number] | null;
+  setMyPosition: (pos: [number, number]) => void;
 }
 
-export default function MapComponent({ fid, round, status }: Props) {
+export default function MapComponent({ fid, round, status, myPosition, setMyPosition }: Props) {
   const center: [number, number] = round?.zone_center_lat && round?.zone_center_lng
     ? [round.zone_center_lat, round.zone_center_lng]
     : [0, 0];
@@ -28,14 +29,14 @@ export default function MapComponent({ fid, round, status }: Props) {
     useMapEvents({
       click(e) {
         if (status !== 'playing' || !round) return;
-
         const lat = e.latlng.lat;
         const lng = e.latlng.lng;
+        const pos: [number, number] = [lat, lng];
+        setMyPosition(pos);  // ← ЛОКАЛЬНО показываем маркер
 
-        const updatedPlayers = (round.players || []).filter((p: any) => p.fid !== fid);
-        updatedPlayers.push({ fid, lat, lng, alive: true });
-
-        supabase.from('rounds').update({ players: updatedPlayers }).eq('id', round.id);
+        const updated = (round.players || []).filter((p: any) => p.fid !== fid);
+        updated.push({ fid, lat, lng, alive: true });
+        supabase.from('rounds').update({ players: updated }).eq('id', round.id);
       },
     });
     return null;
@@ -54,6 +55,7 @@ export default function MapComponent({ fid, round, status }: Props) {
           fillOpacity={0.4}
         />
       )}
+      {myPosition && <Marker position={myPosition} />}  // ← ТВОЙ МАРКЕР!
       <ClickHandler />
     </MapContainer>
   );
