@@ -12,12 +12,23 @@ const MapComponent = dynamic(() => import('./MapComponent'), {
   ),
 });
 
+interface Round {
+  id: number;
+  round_number: number;
+  status: 'waiting' | 'playing' | 'finished';
+  zone_center_lat: number;
+  zone_center_lng: number;
+  zone_radius_km: number;
+  players: { fid: number; lat: number; lng: number; alive: boolean }[];
+  started_at: string | null;
+}
+
 interface Props {
   fid: number;
 }
 
 export default function GameContent({ fid }: Props) {
-  const [round, setRound] = useState<any>(null);
+  const [round, setRound] = useState<Round | null>(null);
   const [myPosition, setMyPosition] = useState<[number, number] | null>(null);
   const [timeLeft, setTimeLeft] = useState(60);
   const [playersCount, setPlayersCount] = useState(0);
@@ -38,16 +49,16 @@ export default function GameContent({ fid }: Props) {
 
     loadRound();
 
-    // ВАЖНО: убираем сравнение с round.id — оно всегда null при первом событии!
     const channel = supabase
       .channel('rounds')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'rounds' },
         (payload: any) => {
-          const newRound = payload.new;
-          // Просто обновляем, если это текущий раунд
-          setRound(prev => (prev?.id === newRound.id || !prev ? newRound : prev));
+          const newRound: Round = payload.new;
+
+          // Теперь с типами — ошибка исчезла!
+          setRound((prev) => (prev?.id === newRound.id || !prev ? newRound : prev));
           setStatus(newRound.status || 'waiting');
           setPlayersCount(newRound.players?.length || 0);
         }
@@ -59,7 +70,7 @@ export default function GameContent({ fid }: Props) {
     };
   }, []);
 
-  // ИДЕАЛЬНЫЙ ТАЙМЕР — без глюков
+  // Идеальный таймер
   useEffect(() => {
     if (status !== 'playing' || !round?.started_at) {
       setTimeLeft(60);
