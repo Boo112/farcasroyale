@@ -23,7 +23,6 @@ export default function GameContent({ fid }: Props) {
   const [playersCount, setPlayersCount] = useState(0);
   const [status, setStatus] = useState<'waiting' | 'playing' | 'finished'>('waiting');
 
-  // Загрузка раунда + подписка
   useEffect(() => {
     const loadRound = async () => {
       const { data: cur } = await supabase.from('current_round').select('round_id').single();
@@ -39,16 +38,20 @@ export default function GameContent({ fid }: Props) {
 
     loadRound();
 
+    // ВАЖНО: убираем сравнение с round.id — оно всегда null при первом событии!
     const channel = supabase
       .channel('rounds')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rounds' }, (payload: any) => {
-        const r = payload.new;
-        if (!round || r.id === round.id) {
-          setRound(r);
-          setStatus(r.status || 'waiting');
-          setPlayersCount(r.players?.length || 0);
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rounds' },
+        (payload: any) => {
+          const newRound = payload.new;
+          // Просто обновляем, если это текущий раунд
+          setRound(prev => (prev?.id === newRound.id || !prev ? newRound : prev));
+          setStatus(newRound.status || 'waiting');
+          setPlayersCount(newRound.players?.length || 0);
         }
-      })
+      )
       .subscribe();
 
     return () => {
@@ -56,7 +59,7 @@ export default function GameContent({ fid }: Props) {
     };
   }, []);
 
-  // ТОЧНЫЙ ТАЙМЕР — 60 сек без глюков
+  // ИДЕАЛЬНЫЙ ТАЙМЕР — без глюков
   useEffect(() => {
     if (status !== 'playing' || !round?.started_at) {
       setTimeLeft(60);
@@ -64,9 +67,9 @@ export default function GameContent({ fid }: Props) {
     }
 
     const startedAt = new Date(round.started_at).getTime();
-    const endTime = startedAt + 60 * 1000;
+    const endTime = startedAt + 60000;
 
-    const updateTimer = () => {
+    const tick = () => {
       const now = Date.now();
       const left = Math.max(0, Math.floor((endTime - now) / 1000));
       setTimeLeft(left);
@@ -75,9 +78,8 @@ export default function GameContent({ fid }: Props) {
       }
     };
 
-    updateTimer();
-    const timer = setInterval(updateTimer, 500);
-
+    tick();
+    const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
   }, [status, round?.started_at]);
 
@@ -89,7 +91,13 @@ export default function GameContent({ fid }: Props) {
       <p className="text-4xl">{playersCount} игроков</p>
 
       <div className="mt-12">
-        <MapComponent fid={fid} round={round} status={status} myPosition={myPosition} setMyPosition={setMyPosition} />
+        <MapComponent
+          fid={fid}
+          round={round}
+          status={status}
+          myPosition={myPosition}
+          setMyPosition={setMyPosition}
+        />
       </div>
 
       <div className="text-6xl font-bold mt-12">
