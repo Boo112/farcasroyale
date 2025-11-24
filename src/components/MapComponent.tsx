@@ -5,7 +5,6 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 
-// Динамические импорты — всё, что связано с Leaflet
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Circle = dynamic(() => import('react-leaflet').then(m => m.Circle), { ssr: false });
@@ -46,7 +45,6 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
     ? [round.zone_center_lat, round.zone_center_lng]
     : [0, 0];
 
-  // Загружаем Leaflet только в браузере
   useEffect(() => {
     if (typeof window !== 'undefined') {
       import('leaflet').then((leaflet) => {
@@ -61,7 +59,6 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
         });
       });
 
-      // CSS
       if (!document.querySelector('link[href*="leaflet.css"]')) {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
@@ -71,7 +68,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
     }
   }, []);
 
-  // Расчёт выживания
+  // Расчёт выживания — ТОЛЬКО КОГДА ЗОНА РАСКРЫТА
   useEffect(() => {
     if (!round?.revealed || !myPosition || !L) return;
 
@@ -101,26 +98,31 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
           <Circle
             center={center}
             radius={(round.zone_radius_km || 6000) * 1000}
-            fillColor="#ff0066"
-            color="#fff"
-            weight={10}
-            fillOpacity={0.5}
+            fillColor="#ff0044"
+            color="#ff0066"
+            weight={12}
+            fillOpacity={0.6}
+            dashArray="10, 10"
           />
         )}
 
-        {/* ТВОЙ МАРКЕР */}
+        {/* ТВОЙ МАРКЕР — УКАЗАТЕЛЬ + КРУЖОК */}
         {myPosition && (
           <Marker
             position={myPosition}
             icon={L.divIcon({
-              className: '',
+              className: 'custom-marker',
               html: round?.revealed
                 ? isAlive
-                  ? '<div style="font-size:60px;color:lime">Checkmark</div>'
-                  : '<div style="font-size:60px;color:red">Cross</div>'
-                : '<div style="font-size:40px;color:yellow">Circle</div>',
-              iconSize: [60, 60],
-              iconAnchor: [30, 30],
+                  ? `<div style="font-size:80px;color:lime;filter:drop-shadow(0 0 10px lime)">Checkmark</div>`
+                  : `<div style="font-size:80px;color:red;filter:drop-shadow(0 0 10px red)">Cross</div>`
+                : `
+                  <div style="width:30px;height:30px;background:#00ff00;border:4px solid white;border-radius:50%;box-shadow:0 0 20px #00ff00;"></div>
+                  <div style="position:absolute;top:-60px;left:-25px;width:50px;text-align:center;color:white;font-weight:bold;font-size:18px;background:rgba(0,0,0,0.7);padding:5px;border-radius:8px;">ТЫ</div>
+                  <div style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:15px solid transparent;border-right:15px solid transparent;border-top:30px solid #00ff00;"></div>
+                `,
+              iconSize: [60, 80],
+              iconAnchor: [30, 80],
             })}
           />
         )}
@@ -131,9 +133,9 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
       {round?.revealed && isAlive !== null && (
         <div className="mt-12 text-8xl font-black animate-bounce">
           {isAlive ? (
-            <p className="text-lime-400 drop-shadow-lg">ВЫЖИЛ!</p>
+            <p className="text-lime-400 drop-shadow-2xl">ВЫЖИЛ!</p>
           ) : (
-            <p className="text-red-500 drop-shadow-lg">УМЕР</p>
+            <p className="text-red-500 drop-shadow-2xl">УМЕР</p>
           )}
         </div>
       )}
