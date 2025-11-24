@@ -1,3 +1,4 @@
+// src/components/GameContent.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -12,55 +13,59 @@ const MapComponent = dynamic(() => import('./MapComponent'), {
   ),
 });
 
-interface Round {
-  id: number;
-  round_number: number;
-  status: 'waiting' | 'playing' | 'finished';
-  zone_center_lat: number;
-  zone_center_lng: number;
-  zone_radius_km: number;
-  players: { fid: number; lat: number; lng: number; alive: boolean }[];
-  started_at: string | null;
-}
-
 interface Props {
   fid: number;
 }
 
 export default function GameContent({ fid }: Props) {
-  const [round, setRound] = useState<Round | null>(null);
+  const [round, setRound] = useState<any>(null);
   const [myPosition, setMyPosition] = useState<[number, number] | null>(null);
   const [timeLeft, setTimeLeft] = useState(60);
   const [playersCount, setPlayersCount] = useState(0);
-  const [status, setStatus] = useState<'waiting' | 'playing' | 'finished'>('waiting');
+  const [gameStatus, setGameStatus] = useState<'waiting' | 'playing' | 'finished'>('waiting');
+  const [roundStartTime, setRoundStartTime] = useState<number | null>(null);
 
+  // ← НИКАКИХ async В useEffect — ЭТО ГЛАВНОЕ!
   useEffect(() => {
+    // Загружаем текущий раунд
     const loadRound = async () => {
-      const { data: cur } = await supabase.from('current_round').select('round_id').single();
-      if (cur?.round_id) {
-        const { data: r } = await supabase.from('rounds').select('*').eq('id', cur.round_id).single();
-        if (r) {
-          setRound(r);
-          setStatus(r.status || 'waiting');
-          setPlayersCount(r.players?.length || 0);
+      try {
+        const { data: cur } = await supabase.from('current_round').select('round_id').single();
+        if (cur?.round_id) {
+          const { data: r } = await supabase.from('rounds').select('*').eq('id', cur.round_id).single();
+          if (r) {
+            setRound(r);
+            setPlayersCount(r.players?.length || 0);
+
+            if (r.status === 'playing') {
+              setGameStatus('playing');
+              setRoundStartTime(Date.now());
+            }
+          }
         }
+      } catch (err) {
+        console.error('Ошибка загрузки раунда:', err);
       }
     };
 
     loadRound();
 
+    // Подписка на изменения
     const channel = supabase
       .channel('rounds')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'rounds' },
         (payload: any) => {
-          const newRound: Round = payload.new;
+          const r = payload.new;
+          setRound(r);
+          setPlayersCount(r.players?.length || 0);
 
-          // Теперь с типами — ошибка исчезла!
-          setRound((prev) => (prev?.id === newRound.id || !prev ? newRound : prev));
-          setStatus(newRound.status || 'waiting');
-          setPlayersCount(newRound.players?.length || 0);
+          if (r.status === 'playing' && gameStatus !== 'playing') {
+            setGameStatus('playing');
+            setRoundStartTime(Date.now());
+            setTimeLeft(60);
+          }
         }
       )
       .subscribe();
@@ -68,31 +73,31 @@ export default function GameContent({ fid }: Props) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, []); // ← ПУСТОЙ МАССИВ — ВСЁ ЧИСТО
 
-  // Идеальный таймер
+  // Идеальный клиентский таймер
   useEffect(() => {
-    if (status !== 'playing' || !round?.started_at) {
-      setTimeLeft(60);
+    if (gameStatus !== 'playing' || roundStartTime === null) {
       return;
     }
 
-    const startedAt = new Date(round.started_at).getTime();
-    const endTime = startedAt + 60000;
+    const endTime = roundStartTime + 60000;
 
     const tick = () => {
       const now = Date.now();
       const left = Math.max(0, Math.floor((endTime - now) / 1000));
       setTimeLeft(left);
+
       if (left <= 0) {
-        setStatus('finished');
+        setGameStatus('finished');
       }
     };
 
     tick();
-    const timer = setInterval(tick, 500);
-    return () => clearInterval(timer);
-  }, [status, round?.started_at]);
+    const interval = setInterval(tick, 1000);
+
+    return () => clearInterval(interval);
+  }, [gameStatus, roundStartTime]);
 
   return (
     <div className="w-full max-w-lg text-center space-y-8">
@@ -105,16 +110,16 @@ export default function GameContent({ fid }: Props) {
         <MapComponent
           fid={fid}
           round={round}
-          status={status}
+          status={gameStatus}
           myPosition={myPosition}
           setMyPosition={setMyPosition}
         />
       </div>
 
       <div className="text-6xl font-bold mt-12">
-        {status === 'waiting' && <p className="animate-pulse">Ожидание игроков...</p>}
-        {status === 'playing' && <p className="text-green-400 animate-bounce">КЛИКАЙ НА КАРТУ!</p>}
-        {status === 'finished' && <p className="text-yellow-400">ВЫЖИЛ!</p>}
+        {gameStatus === 'waiting' && <p className="animate-pulse">Ожидание игроков...</p>}
+        {gameStatus === 'playing' && <p className="text-green-400 animate-bounce">КЛИКАЙ НА КАРТУ!</p>}
+        {gameStatus === 'finished' && <p className="text-yellow-400">ВЫЖИЛ!</p>}
       </div>
     </div>
   );
