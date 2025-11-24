@@ -1,47 +1,49 @@
 // src/app/api/start-round/route.ts
-import { supabaseServer } from '@/lib/supabase-server'
-import { NextResponse } from 'next/server'
+import { supabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 export async function GET() {
-  // Проверяем, есть ли активный раунд
-  const { data: current } = await supabaseServer
-    .from('current_round')
-    .select('round_id')
-    .single()
+  const supabase = supabaseServer;
 
-  if (current?.round_id) {
-    const { data: activeRound } = await supabaseServer
-      .from('rounds')
-      .select('started_at')
-      .eq('id', current.round_id)
-      .single()
+  // Номер нового раунда
+  const { data: last } = await supabase
+    .from('rounds')
+    .select('round_number')
+    .order('id', { ascending: false })
+    .limit(1)
+    .single();
 
-    if (activeRound && new Date(activeRound.started_at).getTime() + 70 * 1000 > Date.now()) {
-      return NextResponse.json({ message: 'Раунд уже идёт', round_id: current.round_id })
-    }
-  }
+  const nextNumber = (last?.round_number || 0) + 1;
+  const startedAt = new Date().toISOString();
 
-  // Создаём новый раунд
   const newRound = {
-    round_number: (current?.round_id || 0) + 1,
-    status: 'playing' as const,
-    zone_center_lat: Math.random() * 180 - 90,
-    zone_center_lng: Math.random() * 360 - 180,
+    round_number: nextNumber,
+    status: 'playing',
+    zone_center_lat: (Math.random() - 0.5) * 180,
+    zone_center_lng: (Math.random() - 0.5) * 360,
     zone_radius_km: 6000,
     players: [],
-    started_at: new Date().toISOString(),
-  }
+    started_at: startedAt,
+  };
 
-  const { data: created } = await supabaseServer
+  const { data: round, error } = await supabase
     .from('rounds')
     .insert(newRound)
     .select()
-    .single()
+    .single();
 
-  // Обновляем текущий раунд
-  await supabaseServer
-    .from('current_round')
-    .upsert({ id: 1, round_id: created.id }, { onConflict: 'id' })
+  if (error) {
+    console.error('Ошибка создания раунда:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
-  return NextResponse.json({ message: 'Новый раунд запущен!', round: created })
+  await supabase.from('current_round').upsert({ id: 1, round_id: round.id });
+
+  return NextResponse.json({
+    message: 'Раунд запущен!',
+    round: round.id,
+    number: nextNumber,
+    status: 'playing',
+    started_at: startedAt,
+  });
 }

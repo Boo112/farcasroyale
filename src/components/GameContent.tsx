@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 
 const MapComponent = dynamic(() => import('./MapComponent'), {
-  ssr: false,
   loading: () => (
     <div className="h-96 bg-gray-900 rounded-3xl flex items-center justify-center text-white text-3xl">
       Загрузка карты...
@@ -24,57 +23,60 @@ export default function GameContent({ fid }: Props) {
   const [playersCount, setPlayersCount] = useState(0);
   const [status, setStatus] = useState<'waiting' | 'playing' | 'finished'>('waiting');
 
-  // ЭТОТ useEffect — 100% БЕЗ ОШИБОК
+  // Загрузка раунда + подписка
   useEffect(() => {
-    // Загрузка текущего раунда
-    (async () => {
-      try {
-        const { data: cur } = await supabase.from('current_round').select('round_id').single();
-        if (cur?.round_id) {
-          const { data: r } = await supabase.from('rounds').select('*').eq('id', cur.round_id).single();
-          if (r) {
-            setRound(r);
-            setStatus(r.status || 'waiting');
-            setPlayersCount(r.players?.length || 0);
-          }
+    const loadRound = async () => {
+      const { data: cur } = await supabase.from('current_round').select('round_id').single();
+      if (cur?.round_id) {
+        const { data: r } = await supabase.from('rounds').select('*').eq('id', cur.round_id).single();
+        if (r) {
+          setRound(r);
+          setStatus(r.status || 'waiting');
+          setPlayersCount(r.players?.length || 0);
         }
-      } catch (err) {
-        console.error('Ошибка загрузки раунда:', err);
       }
-    })();
+    };
 
-    // Подписка на изменения
+    loadRound();
+
     const channel = supabase
       .channel('rounds')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'rounds' },
-        (payload: any) => {
-          const r = payload.new;
-          if (!round || r.id === round.id) {
-            setRound(r);
-            setStatus(r.status || 'waiting');
-            setPlayersCount(r.players?.length || 0);
-          }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rounds' }, (payload: any) => {
+        const r = payload.new;
+        if (!round || r.id === round.id) {
+          setRound(r);
+          setStatus(r.status || 'waiting');
+          setPlayersCount(r.players?.length || 0);
         }
-      )
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []); // ← пустой массив = всё ок
+  }, []);
 
-  // Таймер
+  // ТОЧНЫЙ ТАЙМЕР — 60 сек без глюков
   useEffect(() => {
-    if (status !== 'playing' || !round?.started_at) return;
+    if (status !== 'playing' || !round?.started_at) {
+      setTimeLeft(60);
+      return;
+    }
 
-    const start = new Date(round.started_at).getTime();
-    const timer = setInterval(() => {
-      const left = Math.max(0, 60 - Math.floor((Date.now() - start) / 1000));
+    const startedAt = new Date(round.started_at).getTime();
+    const endTime = startedAt + 60 * 1000;
+
+    const updateTimer = () => {
+      const now = Date.now();
+      const left = Math.max(0, Math.floor((endTime - now) / 1000));
       setTimeLeft(left);
-      if (left === 0) setStatus('finished');
-    }, 500);
+      if (left <= 0) {
+        setStatus('finished');
+      }
+    };
+
+    updateTimer();
+    const timer = setInterval(updateTimer, 500);
 
     return () => clearInterval(timer);
   }, [status, round?.started_at]);
