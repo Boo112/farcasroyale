@@ -23,11 +23,12 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
   const [L, setL] = useState<any>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  // ← ИСПРАВЛЕНО: берём новые имена полей из базы!
+  // Правильные имена полей из базы!
   const center: [number, number] = round?.zone_lat != null && round?.zone_lng != null
     ? [round.zone_lat, round.zone_lng]
     : [0, 0];
 
+  // Загрузка Leaflet только в браузере
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -35,6 +36,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
       const leaflet = await import('leaflet');
       setL(leaflet.default);
 
+      // CSS один раз
       if (!document.querySelector('link[href*="leaflet.css"]')) {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
@@ -42,6 +44,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
         document.head.appendChild(link);
       }
 
+      // Фиксим иконки
       delete (leaflet.default.Icon.Default.prototype as any)._getIconUrl;
       leaflet.default.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -53,11 +56,9 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
     };
 
     init();
-  }, []);
+  }, []); // ← ВСЁ ЗАКРЫТО ПРАВИЛЬНО!
 
-  // ← зависимость только один раз
-  []);
-
+  // Клик по карте
   const handleClick = (e: any) => {
     if (status !== 'playing' || !round || !L) return;
 
@@ -65,20 +66,19 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
     const pos: [number, number] = [lat, lng];
     setMyPosition(pos);
 
-    // Обновляем players как строку JSON
     const currentPlayers = round.players ? JSON.parse(round.players) : [];
     const filtered = currentPlayers.filter((p: any) => p.fid !== fid);
     filtered.push({ fid, lat, lng });
-    
+
     supabase
       .from('rounds')
       .update({ players: JSON.stringify(filtered) })
       .eq('id', round.id);
   };
 
-  // Выживание
+  // Расчёт выживания
   useEffect(() => {
-    if (!round?.revealed || !myPosition || !round.zone_lat) {
+    if (!round?.revealed || !myPosition || round?.zone_lat == null) {
       setIsAlive(null);
       return;
     }
@@ -86,10 +86,10 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
     const R = 6371;
     const dLat = (myPosition[0] - round.zone_lat) * (Math.PI / 180);
     const dLon = (myPosition[1] - round.zone_lng) * (Math.PI / 180);
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
               Math.cos(round.zone_lat * Math.PI / 180) *
               Math.cos(myPosition[0] * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     setIsAlive(distance > (round.zone_radius_km || 6000));
@@ -98,7 +98,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
   if (!mapReady || !L) {
     return (
       <div className="h-96 bg-gradient-to-br from-purple-900 to-black rounded-3xl flex items-center justify-center">
-        <p className="text-4xl text-white animate-pulse">Загрузка карты...</p>
+        <p className="text-4xl text-white animate-pulse">Загрузка карты мира...</p>
       </div>
     );
   }
@@ -110,6 +110,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
         zoom={2}
         className="h-96 rounded-3xl shadow-2xl border-8 border-purple-600"
         style={{ background: '#000' }}
+        scrollWheelZoom={false}
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
@@ -127,7 +128,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
           />
         )}
 
-        {/* ТВОЙ КРУТОЙ УКАЗАТЕЛЬ */}
+        {/* ТВОЙ УКАЗАТЕЛЬ */}
         {myPosition && (
           <Marker
             position={myPosition}
@@ -135,7 +136,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
               className: '',
               html: round?.revealed
                 ? isAlive
-                  ? '<div style="font-size:100px;color:lime;filter:drop-shadow(0 0 0 20px lime)">Checkmark</div>'
+                  ? '<div style="font-size:100px;color:lime;filter:drop-shadow(0 0 20px lime)">Checkmark</div>'
                   : '<div style="font-size:100px;color:red;filter:drop-shadow(0 0 20px red)">Cross</div>'
                 : `
                   <div style="position:relative;">
@@ -155,7 +156,10 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
           <div
             style={{
               position: 'absolute',
-              top: 0, left: 0, right: 0, bottom: 0,
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
               zIndex: 1000,
               cursor: 'crosshair',
             }}
