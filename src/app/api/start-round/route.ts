@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 export async function GET() {
   const supabase = supabaseServer;
 
-  // Номер нового раунда
+  // Получаем последний номер раунда
   const { data: last } = await supabase
     .from('rounds')
     .select('round_number')
@@ -22,7 +22,7 @@ export async function GET() {
     zone_center_lat: (Math.random() - 0.5) * 180,
     zone_center_lng: (Math.random() - 0.5) * 360,
     zone_radius_km: 6000,
-    players: [],
+    players: [],           // ← ВАЖНО: всегда пустой массив при старте!
     started_at: startedAt,
   };
 
