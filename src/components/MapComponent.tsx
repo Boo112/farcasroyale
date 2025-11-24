@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 
-// Динамическая загрузка — чтобы не падало на сервере
+// Динамическая загрузка всего Leaflet
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const Circle = dynamic(() => import('react-leaflet').then(m => m.Circle), { ssr: false });
@@ -21,32 +21,32 @@ interface Props {
 
 export default function MapComponent({ fid, round, status, myPosition, setMyPosition }: Props) {
   const [isAlive, setIsAlive] = useState<boolean | null>(null);
+  const [L, setL] = useState<any>(null);
   const [mapReady, setMapReady] = useState(false);
 
   const center: [number, number] = round?.zone_center_lat && round?.zone_center_lng
     ? [round.zone_center_lat, round.zone_center_lng]
     : [0, 0];
 
-  // Один раз подключаем Leaflet + CSS
+  // Загружаем Leaflet только в браузере
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const loadLeaflet = async () => {
-      // CSS — только один раз!
+      const leaflet = await import('leaflet');
+      setL(leaflet.default);
+
+      // CSS один раз
       if (!document.querySelector('link[href*="leaflet.css"]')) {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        link.integrity = 'sha256-sA+ZJOvH1q0b1i9p2dW9q8F8k0WvL3J6Z8kYJ8+Z4U=';
-        link.crossOrigin = '';
         document.head.appendChild(link);
       }
 
-      const L = (await import('leaflet')).default;
-
       // Фиксим иконки
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
+      delete (leaflet.default.Icon.Default.prototype as any)._getIconUrl;
+      leaflet.default.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
         iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
@@ -60,7 +60,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
 
   // Клик по карте
   const handleClick = (e: any) => {
-    if (status !== 'playing' || !round) return;
+    if (status !== 'playing' || !round || !L) return;
     const { lat, lng } = e.latlng;
     const pos: [number, number] = [lat, lng];
     setMyPosition(pos);
@@ -72,7 +72,7 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
 
   // Расчёт выживания
   useEffect(() => {
-    if (!round?.revealed || !myPosition) {
+    if (!round?.revealed || !myPosition || !L) {
       setIsAlive(null);
       return;
     }
@@ -86,10 +86,9 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
               Math.sin(dLon/2) * Math.sin(dLon/2);
     const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     setIsAlive(distance > (round.zone_radius_km || 6000));
-  }, [round?.revealed, myPosition, round?.zone_center_lat, round?.zone_center_lng, round?.zone_radius_km]);
+  }, [round?.revealed, myPosition, round?.zone_center_lat, round?.zone_center_lng, round?.zone_radius_km, L]);
 
-  // Пока карта грузится
-  if (!mapReady) {
+  if (!mapReady || !L) {
     return (
       <div className="h-96 bg-gradient-to-br from-purple-900 to-black rounded-3xl flex items-center justify-center">
         <p className="text-4xl text-white animate-pulse">Загрузка карты мира...</p>
@@ -105,18 +104,13 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
         className="h-96 rounded-3xl shadow-2xl"
         style={{ background: '#000' }}
         scrollWheelZoom={false}
-        dragging={true}
-        touchZoom={true}
-        doubleClickZoom={false}
-        boxZoom={false}
-        keyboard={false}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          attribution='&copy; OpenStreetMap'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {/* ЗОНА СМЕРТИ — ПОЯВЛЯЕТСЯ ПОСЛЕ 60 СЕК */}
+        {/* ЗОНА СМЕРТИ */}
         {round?.revealed && (
           <Circle
             center={center}
@@ -135,9 +129,8 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
         {myPosition && (
           <Marker
             position={myPosition}
-            eventHandlers={{ click: () => {} }}
             icon={L.divIcon({
-              className: 'my-custom-pin',
+              className: 'custom-pin',
               html: round?.revealed
                 ? isAlive
                   ? '<div style="font-size:100px;color:lime;filter:drop-shadow(0 0 20px lime)">Checkmark</div>'
@@ -155,9 +148,27 @@ export default function MapComponent({ fid, round, status, myPosition, setMyPosi
           />
         )}
 
-        {/* Клик */}
+        {/* Клик по карте — через overlay */}
         {status === 'playing' && (
-          <div className="leaflet-container" onClick={handleClick} style={{ cursor: 'crosshair' }} />
+          <div
+            className="leaflet-container"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 1000,
+              cursor: 'crosshair',
+            }}
+            onClick={(e) => {
+              const map = (e.target as any)._map || (e.target as any).parentElement?._map;
+              if (map) {
+                const { lat, lng } = map.mouseEventToLatLng(e.nativeEvent);
+                handleClick({ latlng: { lat, lng } });
+              }
+            }}
+          />
         )}
       </MapContainer>
 
